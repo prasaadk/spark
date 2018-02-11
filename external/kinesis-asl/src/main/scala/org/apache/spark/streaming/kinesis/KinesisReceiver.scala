@@ -23,6 +23,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
+import com.amazonaws.ClientConfiguration
 import com.amazonaws.services.kinesis.clientlibrary.interfaces.{IRecordProcessor, IRecordProcessorCheckpointer, IRecordProcessorFactory}
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.{KinesisClientLibConfiguration, Worker}
 import com.amazonaws.services.kinesis.model.Record
@@ -92,7 +93,10 @@ private[kinesis] class KinesisReceiver[T](
     messageHandler: Record => T,
     kinesisCreds: SparkAWSCredentials,
     dynamoDBCreds: Option[SparkAWSCredentials],
-    cloudWatchCreds: Option[SparkAWSCredentials])
+    cloudWatchCreds: Option[SparkAWSCredentials],
+    kinesisClientConfig: Option[ClientConfiguration],
+    dynamoDBClientConfig: Option[ClientConfiguration],
+    cloudWatchClientConfig: Option[ClientConfiguration])
   extends Receiver[T](storageLevel) with Logging { receiver =>
 
   /*
@@ -163,6 +167,9 @@ private[kinesis] class KinesisReceiver[T](
         .withInitialPositionInStream(initialPosition.getPosition)
         .withTaskBackoffTimeMillis(500)
         .withRegionName(regionName)
+        .withKinesisClientConfig(cloudWatchClientConfig.getOrElse(new ClientConfiguration()))
+        .withDynamoDBClientConfig(dynamoDBClientConfig.getOrElse(new ClientConfiguration()))
+        .withCloudWatchClientConfig(cloudWatchClientConfig.getOrElse(new ClientConfiguration()))
 
       // Update the Kinesis client lib config with timestamp
       // if InitialPositionInStream.AT_TIMESTAMP is passed

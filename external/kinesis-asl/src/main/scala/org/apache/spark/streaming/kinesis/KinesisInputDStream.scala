@@ -17,10 +17,10 @@
 
 package org.apache.spark.streaming.kinesis
 
-import scala.reflect.ClassTag
-
+import com.amazonaws.ClientConfiguration
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
 import com.amazonaws.services.kinesis.model.Record
+import scala.reflect.ClassTag
 
 import org.apache.spark.annotation.InterfaceStability
 import org.apache.spark.rdd.RDD
@@ -44,7 +44,10 @@ private[kinesis] class KinesisInputDStream[T: ClassTag](
     val messageHandler: Record => T,
     val kinesisCreds: SparkAWSCredentials,
     val dynamoDBCreds: Option[SparkAWSCredentials],
-    val cloudWatchCreds: Option[SparkAWSCredentials]
+    val cloudWatchCreds: Option[SparkAWSCredentials],
+    val kinesisClientConfig: Option[ClientConfiguration],
+    val dynamoDBClientConfig: Option[ClientConfiguration],
+    val cloudWatchClientConfig: Option[ClientConfiguration]
   ) extends ReceiverInputDStream[T](_ssc) {
 
   import KinesisReadConfigurations._
@@ -80,7 +83,8 @@ private[kinesis] class KinesisInputDStream[T: ClassTag](
   override def getReceiver(): Receiver[T] = {
     new KinesisReceiver(streamName, endpointUrl, regionName, initialPosition,
       checkpointAppName, checkpointInterval, _storageLevel, messageHandler,
-      kinesisCreds, dynamoDBCreds, cloudWatchCreds)
+      kinesisCreds, dynamoDBCreds, cloudWatchCreds, kinesisClientConfig,
+      dynamoDBClientConfig, cloudWatchClientConfig)
   }
 }
 
@@ -107,7 +111,9 @@ object KinesisInputDStream {
     private var kinesisCredsProvider: Option[SparkAWSCredentials] = None
     private var dynamoDBCredsProvider: Option[SparkAWSCredentials] = None
     private var cloudWatchCredsProvider: Option[SparkAWSCredentials] = None
-
+    private var kinesisClientConfig: Option[ClientConfiguration] = None
+    private var dynamoDBClientConfig: Option[ClientConfiguration] = None
+    private var cloudWatchClientConfig: Option[ClientConfiguration] = None
     /**
      * Sets the StreamingContext that will be used to construct the Kinesis DStream. This is a
      * required parameter.
@@ -269,6 +275,39 @@ object KinesisInputDStream {
     }
 
     /**
+     * Sets the [[ClientConfiguration]] to use to connect to the AWS Kinesis
+     * endpoint. Defaults to [[ClientConfiguration]] if no custom value is specified.
+     *
+     * @param clientConfig [[ClientConfiguration]] to use for Kinesis
+     */
+    def kinesisClientConfig(clientConfig: ClientConfiguration): Builder = {
+      kinesisClientConfig = Option(clientConfig)
+      this
+    }
+
+    /**
+     * Sets the [[ClientConfiguration]] to use to connect to the AWS DynamoDB
+     * endpoint. Defaults to [[ClientConfiguration]] if no custom value is specified.
+     *
+     * @param clientConfig [[ClientConfiguration]] to use for DynamoDB
+     */
+    def dynamoDBClientConfig(clientConfig: ClientConfiguration): Builder = {
+      dynamoDBClientConfig = Option(clientConfig)
+      this
+    }
+
+    /**
+     * Sets the [[ClientConfiguration]] to use to connect to the AWS CloudWatch
+     * endpoint. Defaults to [[ClientConfiguration]] if no custom value is specified.
+     *
+     * @param clientConfig [[ClientConfiguration]] to use for CloudWatch
+     */
+    def cloudWatchClientConfig(clientConfig: ClientConfiguration): Builder = {
+      cloudWatchClientConfig = Option(clientConfig)
+      this
+    }
+
+    /**
      * Create a new instance of [[KinesisInputDStream]] with configured parameters and the provided
      * message handler.
      *
@@ -290,7 +329,10 @@ object KinesisInputDStream {
         ssc.sc.clean(handler),
         kinesisCredsProvider.getOrElse(DefaultCredentials),
         dynamoDBCredsProvider,
-        cloudWatchCredsProvider)
+        cloudWatchCredsProvider,
+        kinesisClientConfig,
+        dynamoDBClientConfig,
+        cloudWatchClientConfig)
     }
 
     /**

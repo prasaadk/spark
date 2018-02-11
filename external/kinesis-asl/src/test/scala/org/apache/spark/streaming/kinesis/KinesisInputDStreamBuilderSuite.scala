@@ -19,6 +19,7 @@ package org.apache.spark.streaming.kinesis
 
 import java.util.Calendar
 
+import com.amazonaws.ClientConfiguration
 import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.mockito.MockitoSugar
@@ -78,6 +79,9 @@ class KinesisInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterE
     assert(dstream.kinesisCreds == DefaultCredentials)
     assert(dstream.dynamoDBCreds == None)
     assert(dstream.cloudWatchCreds == None)
+    assert(dstream.kinesisClientConfig == None)
+    assert(dstream.dynamoDBClientConfig == None)
+    assert(dstream.cloudWatchClientConfig == None)
   }
 
   test("should propagate custom non-auth values to KinesisInputDStream") {
@@ -90,6 +94,9 @@ class KinesisInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterE
     val customKinesisCreds = mock[SparkAWSCredentials]
     val customDynamoDBCreds = mock[SparkAWSCredentials]
     val customCloudWatchCreds = mock[SparkAWSCredentials]
+    val customKinesisClientConfig = mock[ClientConfiguration]
+    val customDynamoDBClientConfig = mock[ClientConfiguration]
+    val customCloudWatchClientConfig = mock[ClientConfiguration]
 
     val dstream = builder
       .endpointUrl(customEndpointUrl)
@@ -101,6 +108,9 @@ class KinesisInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterE
       .kinesisCredentials(customKinesisCreds)
       .dynamoDBCredentials(customDynamoDBCreds)
       .cloudWatchCredentials(customCloudWatchCreds)
+      .kinesisClientConfig(customKinesisClientConfig)
+      .dynamoDBClientConfig(customDynamoDBClientConfig)
+      .cloudWatchClientConfig(customCloudWatchClientConfig)
       .build()
     assert(dstream.endpointUrl == customEndpointUrl)
     assert(dstream.regionName == customRegion)
@@ -111,6 +121,9 @@ class KinesisInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterE
     assert(dstream.kinesisCreds == customKinesisCreds)
     assert(dstream.dynamoDBCreds == Option(customDynamoDBCreds))
     assert(dstream.cloudWatchCreds == Option(customCloudWatchCreds))
+    assert(dstream.kinesisClientConfig == Option(customKinesisClientConfig))
+    assert(dstream.dynamoDBClientConfig == Option(customDynamoDBClientConfig))
+    assert(dstream.cloudWatchClientConfig == Option(customCloudWatchClientConfig))
 
     // Testing with AtTimestamp
     val cal = Calendar.getInstance()
@@ -128,6 +141,9 @@ class KinesisInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterE
       .kinesisCredentials(customKinesisCreds)
       .dynamoDBCredentials(customDynamoDBCreds)
       .cloudWatchCredentials(customCloudWatchCreds)
+      .kinesisClientConfig(customKinesisClientConfig)
+      .dynamoDBClientConfig(customDynamoDBClientConfig)
+      .cloudWatchClientConfig(customCloudWatchClientConfig)
       .build()
     assert(dstreamAtTimestamp.endpointUrl == customEndpointUrl)
     assert(dstreamAtTimestamp.regionName == customRegion)
@@ -141,6 +157,9 @@ class KinesisInputDStreamBuilderSuite extends TestSuiteBase with BeforeAndAfterE
     assert(dstreamAtTimestamp.kinesisCreds == customKinesisCreds)
     assert(dstreamAtTimestamp.dynamoDBCreds == Option(customDynamoDBCreds))
     assert(dstreamAtTimestamp.cloudWatchCreds == Option(customCloudWatchCreds))
+    assert(dstreamAtTimestamp.kinesisClientConfig == Option(customKinesisClientConfig))
+    assert(dstreamAtTimestamp.dynamoDBClientConfig == Option(customDynamoDBClientConfig))
+    assert(dstreamAtTimestamp.cloudWatchClientConfig == Option(customCloudWatchClientConfig))
   }
 
   test("old Api should throw UnsupportedOperationExceptionexception with AT_TIMESTAMP") {
