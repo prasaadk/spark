@@ -24,8 +24,8 @@ import scala.collection.mutable.{ArrayBuffer, Map => MutableMap}
 
 import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, CurrentBatchTimestamp, CurrentDate, CurrentTimestamp}
-import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, LogicalPlan}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeMap, CurrentBatchTimestamp, CurrentDate, CurrentTimestamp}
+import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, LogicalPlan, Project}
 import org.apache.spark.sql.execution.SQLExecution
 import org.apache.spark.sql.execution.datasources.v2.{StreamingDataSourceV2Relation, WriteToDataSourceV2}
 import org.apache.spark.sql.execution.streaming.sources.{InternalRowMicroBatchWriter, MicroBatchWriter}
@@ -72,27 +72,36 @@ class MicroBatchExecution(
     // Note that we have to use the previous `output` as attributes in StreamingExecutionRelation,
     // since the existing logical plan has already used those attributes. The per-microbatch
     // transformation is responsible for replacing attributes with their final values.
+
+    val disabledSources =
+      sparkSession.sqlContext.conf.disabledV2StreamingMicroBatchReaders.split(",")
+
     val _logicalPlan = analyzedPlan.transform {
-      case streamingRelation@StreamingRelation(dataSource, _, output) =>
+      case streamingRelation@StreamingRelation(dataSourceV1, sourceName, output) =>
         toExecutionRelationMap.getOrElseUpdate(streamingRelation, {
           // Materialize source to avoid creating it in every batch
           val metadataPath = s"$resolvedCheckpointRoot/sources/$nextSourceId"
-          val source = dataSource.createSource(metadataPath)
+          val source = dataSourceV1.createSource(metadataPath)
           nextSourceId += 1
+          logInfo(s"Using Source [$source] from DataSourceV1 named '$sourceName' [$dataSourceV1]")
           StreamingExecutionRelation(source, output)(sparkSession)
         })
-      case s @ StreamingRelationV2(source: MicroBatchReadSupport, _, options, output, _) =>
+      case s @ StreamingRelationV2(
+        dataSourceV2: MicroBatchReadSupport, sourceName, options, output, _) if
+          !disabledSources.contains(dataSourceV2.getClass.getCanonicalName) =>
         v2ToExecutionRelationMap.getOrElseUpdate(s, {
           // Materialize source to avoid creating it in every batch
           val metadataPath = s"$resolvedCheckpointRoot/sources/$nextSourceId"
-          val reader = source.createMicroBatchReader(
+          val reader = dataSourceV2.createMicroBatchReader(
             Optional.empty(), // user specified schema
             metadataPath,
             new DataSourceOptions(options.asJava))
           nextSourceId += 1
+          logInfo(s"Using MicroBatchReader [$reader] from " +
+            s"DataSourceV2 named '$sourceName' [$dataSourceV2]")
           StreamingExecutionRelation(reader, output)(sparkSession)
         })
-      case s @ StreamingRelationV2(_, sourceName, _, output, v1Relation) =>
+      case s @ StreamingRelationV2(dataSourceV2, sourceName, _, output, v1Relation) =>
         v2ToExecutionRelationMap.getOrElseUpdate(s, {
           // Materialize source to avoid creating it in every batch
           val metadataPath = s"$resolvedCheckpointRoot/sources/$nextSourceId"
@@ -102,6 +111,7 @@ class MicroBatchExecution(
           }
           val source = v1Relation.get.dataSource.createSource(metadataPath)
           nextSourceId += 1
+          logInfo(s"Using Source [$source] from DataSourceV2 named '$sourceName' [$dataSourceV2]")
           StreamingExecutionRelation(source, output)(sparkSession)
         })
     }
@@ -415,8 +425,6 @@ class MicroBatchExecution(
       }
     }
 
-    // A list of attributes that will need to be updated.
-    val replacements = new ArrayBuffer[(Attribute, Attribute)]
     // Replace sources in the logical plan with data that has arrived since the last batch.
     val newBatchesPlan = logicalPlan transform {
       case StreamingExecutionRelation(source, output) =>
@@ -424,18 +432,18 @@ class MicroBatchExecution(
           assert(output.size == dataPlan.output.size,
             s"Invalid batch: ${Utils.truncatedString(output, ",")} != " +
               s"${Utils.truncatedString(dataPlan.output, ",")}")
-          replacements ++= output.zip(dataPlan.output)
-          dataPlan
+
+          val aliases = output.zip(dataPlan.output).map { case (to, from) =>
+            Alias(from, to.name)(exprId = to.exprId, explicitMetadata = Some(from.metadata))
+          }
+          Project(aliases, dataPlan)
         }.getOrElse {
           LocalRelation(output, isStreaming = true)
         }
     }
 
     // Rewire the plan to use the new attributes that were returned by the source.
-    val replacementMap = AttributeMap(replacements)
     val newAttributePlan = newBatchesPlan transformAllExpressions {
-      case a: Attribute if replacementMap.contains(a) =>
-        replacementMap(a).withMetadata(a.metadata)
       case ct: CurrentTimestamp =>
         CurrentBatchTimestamp(offsetSeqMetadata.batchTimestampMs,
           ct.dataType)
@@ -491,6 +499,16 @@ class MicroBatchExecution(
     try {
       // Wake up any threads that are waiting for the stream to progress.
       awaitProgressLockCondition.signalAll()
+    } finally {
+      awaitProgressLock.unlock()
+    }
+  }
+
+  /** Execute a function while locking the stream from making an progress */
+  private[sql] def withProgressLocked(f: => Unit): Unit = {
+    awaitProgressLock.lock()
+    try {
+      f
     } finally {
       awaitProgressLock.unlock()
     }
